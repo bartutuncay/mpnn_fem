@@ -9,7 +9,7 @@ The Pytorch-based FEM solver was inspired by the Github repository **torch-fem**
 - Implementation of dynamic problems
 - Updated dependencies and better compability with the main repo
 
-### File structure:
+### Repository structure:
 torch_fem_module\
 ├─ README.md\
 ├─ src/torch_fem3d/\
@@ -58,3 +58,9 @@ torch_fem_module\
 │     ├─ loops.py                # BPTT over time, checkpointing
 │     ├─ schedulers.py
 │     └─ optim_utils.py
+
+
+## Data Generation Pipeline (to be improved)
+### 2D
+
+### 3D

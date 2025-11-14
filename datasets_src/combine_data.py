@@ -47,6 +47,19 @@ def incidence_edges_from_conn(conn: np.ndarray, nodes: torch.Tensor) -> Tuple[to
 
     return edge_index, rel_disp
 
+def mesh_edges_from_conn(conn: torch.Tensor) -> torch.Tensor:
+    conn = conn.long()                             # [E, nverts]
+    hex_edges = torch.tensor([
+        [0,1], [1,2], [2,3], [3,0],     # bottom face
+        [4,5], [5,6], [6,7], [7,4],     # top face
+        [0,4], [1,5], [2,6], [3,7],     # vertical edges
+    ])
+    pairs = conn[:, hex_edges]          # [E, 12, 2]
+    pairs = pairs.reshape(-1, 2)
+    pairs = torch.unique(torch.sort(pairs, dim=1).values, dim=0).T
+    edge_index = pairs
+    return edge_index
+
 # Connectivity
 # mesh nodes <-> mesh nodes
 # mesh nodes <-> element nodes
@@ -89,6 +102,7 @@ def data_to_graph(idx, path:str,materials_csv:str,device):
 
     # mesh-mesh: distance
     ei = stiffness_to_node_adj_edge_index(simdata["stiffness"], num_nodes=nodes.size(0), dof_per_node=nodes.size(1))
+    ei = mesh_edges_from_conn(simdata["stiffness"])
     data["nodes", "adjacent", "nodes"].edge_index = ei
     data["nodes", "adjacent_rev", "nodes"].edge_index = ei.flip(0)
     data["nodes", "adjacent", "nodes"].edge_attr = (nodes[ei[1]] - nodes[ei[0]]).float()

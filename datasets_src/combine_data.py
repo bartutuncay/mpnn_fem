@@ -136,5 +136,5 @@ def generate_dataset(data_dir:str):
     print(len(files))
     return samples
 
-dataset = generate_dataset('torchfem_dataset/panel_plasticity_2')
-torch.save(dataset, "torchfem_dataset/panel_plasticity_2/panel_combined_3.pt")
+dataset = generate_dataset('torchfem_dataset/tube_2')
+torch.save(dataset, "torchfem_dataset/tube_2/tube_combined.pt")

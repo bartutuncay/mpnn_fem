@@ -76,6 +76,7 @@ def data_to_graph(path:str,device):
     data['nodes'].pos = nodes #                                             [N,3]
     data['nodes'].bc = simdata['boundary'] #                                [N,3]
     data['nodes'].f_ext = simdata['ext_forces'] #forces in timeseries format     [T,N,3]
+    data['nodes'].material = one_hot(label, vocab, device=device).unsqueeze(0).repeat(int(conn.shape[0]), 1) # [E,len(materials)]
     #data['nodes'].dr = simdata['dirichlet_disp'] #dirichlet displacement    [N,3]
 
     # element node properties: material, stiffness matrix

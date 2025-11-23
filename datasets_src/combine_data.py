@@ -76,7 +76,6 @@ def data_to_graph(path:str,device):
     data['nodes'].pos = nodes #                                             [N,3]
     data['nodes'].bc = simdata['boundary'] #                                [N,3]
     data['nodes'].f_ext = simdata['ext_forces'] #forces in timeseries format     [T,N,3]
-    data['nodes'].material = one_hot(label, vocab, device=device).unsqueeze(0).repeat(int(conn.shape[0]), 1) # [E,len(materials)]
     #data['nodes'].dr = simdata['dirichlet_disp'] #dirichlet displacement    [N,3]
 
     # element node properties: material, stiffness matrix
@@ -93,22 +92,25 @@ def data_to_graph(path:str,device):
 
     # edges: connectivity mesh-mesh, mesh-element
     # mesh-element: distance to element centroid
+    elem_mat = one_hot(label, vocab, device=device).unsqueeze(0).repeat(int(c2n_ei.shape[1]), 1)
     data["elements", "contributes", "nodes"].edge_index = c2n_ei
-    data["elements", "contributes", "nodes"].edge_attr = c2n_w
+    data["elements", "contributes", "nodes"].edge_attr = torch.cat([c2n_w,elem_mat],dim=-1)
+    
+
     data["nodes", "belongs_to", "elements"].edge_index = c2n_ei.flip(0)
-    data["nodes", "belongs_to", "elements"].edge_attr = -c2n_w
+    data["nodes", "belongs_to", "elements"].edge_attr = torch.cat([-c2n_w,elem_mat],dim=-1)
     data['elements'].num_nodes = simdata['stress_history'].size(1)
 
     # mesh-mesh: distance
     #ei = stiffness_to_node_adj_edge_index(simdata["stiffness"], num_nodes=nodes.size(0), dof_per_node=nodes.size(1))
     ei = mesh_edges_from_conn(simdata["elements"]) # [2,N]
     src, dst = ei
+    edge_mat = one_hot(label, vocab, device=device).unsqueeze(0).repeat(int(ei.shape[1]), 1)
     disp = (nodes[dst] - nodes[src]).float()
     data["nodes", "adjacent", "nodes"].edge_index = ei
     data["nodes", "adjacent_rev", "nodes"].edge_index = ei.flip(0)
-    data["nodes", "adjacent", "nodes"].edge_attr = disp
-    data["nodes", "adjacent_rev", "nodes"].edge_attr = -disp
-
+    data["nodes", "adjacent", "nodes"].edge_attr = torch.cat([disp,edge_mat],dim=-1)
+    data["nodes", "adjacent_rev", "nodes"].edge_attr = torch.cat([-disp,edge_mat],dim=-1)
     #data['elements'].edge_index = simdata['elements'] #mesh-element [E,8]
     #data['nodes'].edge_index = stiffness_to_node_adj_edge_index(simdata["stiffness"], num_nodes=nodes.size(0), dof_per_node=nodes.size(1)) #from stiffness matrix, only connectivity
 
@@ -137,5 +139,5 @@ def generate_dataset(data_dir:str):
     print(len(files))
     return samples
 
-dataset = generate_dataset('torchfem_dataset/tube_2')
-torch.save(dataset, "torchfem_dataset/tube_2/tube_combined.pt")
+dataset = generate_dataset('torchfem_dataset/panel_plasticity_3')
+torch.save(dataset, "torchfem_dataset/panel_plasticity_3/panel_combined_4.pt")

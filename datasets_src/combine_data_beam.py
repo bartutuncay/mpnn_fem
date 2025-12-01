@@ -9,15 +9,12 @@ import pandas as pd
 
 # Material encoding (1-h)
 def load_material_vocab() -> Tuple[Dict[str, int], Dict[int, str]]:
-    # CSV: idx,label
-    #labels = sorted(df["label"].astype(str).unique().tolist())
-    labels = ['concrete','steel','aluminum','CFRP'] #0,1,2,3 fixed material labels for now
+    labels = ['steel'] #fixed
     vocab = {lbl: i for i, lbl in enumerate(labels)}
     return vocab
 
-def one_hot(label: str, vocab: Dict[str, int], device=None, dtype=torch.float) -> torch.Tensor:
-    vec = torch.zeros(len(vocab), dtype=dtype, device=device)
-    vec[vocab[label]] = 1.0
+def one_hot(vocab: Dict[str, int], device=None, dtype=torch.float) -> torch.Tensor:
+    vec = torch.ones(len(vocab), dtype=dtype, device=device) #elements only placeholder
     return vec
 
 def stiffness_to_node_adj_edge_index(K: torch.Tensor, num_nodes: int, dof_per_node: int = 3) -> torch.Tensor: #mesh-mesh nodes
@@ -58,6 +55,10 @@ def mesh_edges_from_conn(conn: torch.Tensor) -> torch.Tensor:
     edge_index = pairs
     return edge_index
 
+def mesh_edges_nearest(nodes: torch.Tensor) -> torch.Tensor:
+    # build mesh connections from nearest neighbors
+    return
+
 # Connectivity
 # mesh nodes <-> mesh nodes
 # mesh nodes <-> element nodes
@@ -69,7 +70,6 @@ def data_to_graph(path:str,device):
     conn = simdata["elements"]
     conn = conn.cpu().numpy() if isinstance(conn, torch.Tensor) else np.asarray(conn)
     nodes = simdata['nodes']
-    label = simdata['material']
     c2n_ei, c2n_w = incidence_edges_from_conn(conn,nodes)  # [2, E_cn], [E_cn, 1]
     
     # mesh node properties: positions, forces, BC, dirichlet displacement
@@ -79,7 +79,7 @@ def data_to_graph(path:str,device):
     #data['nodes'].dr = simdata['dirichlet_disp'] #dirichlet displacement    [N,3]
 
     # element node properties: material, stiffness matrix
-    data['elements'].material = one_hot(label, vocab, device=device).unsqueeze(0).repeat(int(conn.shape[0]), 1) # [E,len(materials)]
+    data['elements'].material = one_hot(vocab, device=device).unsqueeze(0).repeat(int(conn.shape[0]), 1) # [E,len(materials)]
     #data['elements'].stiffness = #stiffness is a learned feature
 
     # target properties
@@ -92,7 +92,7 @@ def data_to_graph(path:str,device):
 
     # edges: connectivity mesh-mesh, mesh-element
     # mesh-element: distance to element centroid
-    elem_mat = one_hot(label, vocab, device=device).unsqueeze(0).repeat(int(c2n_ei.shape[1]), 1)
+    elem_mat = one_hot(vocab, device=device).unsqueeze(0).repeat(int(c2n_ei.shape[1]), 1)
     data["elements", "contributes", "nodes"].edge_index = c2n_ei
     data["elements", "contributes", "nodes"].edge_attr = torch.cat([c2n_w,elem_mat],dim=-1)
     
@@ -105,7 +105,7 @@ def data_to_graph(path:str,device):
     #ei = stiffness_to_node_adj_edge_index(simdata["stiffness"], num_nodes=nodes.size(0), dof_per_node=nodes.size(1))
     ei = mesh_edges_from_conn(simdata["elements"]) # [2,N]
     src, dst = ei
-    edge_mat = one_hot(label, vocab, device=device).unsqueeze(0).repeat(int(ei.shape[1]), 1)
+    edge_mat = one_hot(vocab, device=device).unsqueeze(0).repeat(int(ei.shape[1]), 1)
     disp = (nodes[dst] - nodes[src]).float()
     data["nodes", "adjacent", "nodes"].edge_index = ei
     data["nodes", "adjacent_rev", "nodes"].edge_index = ei.flip(0)
@@ -130,14 +130,17 @@ def data_to_graph(path:str,device):
 
 def generate_dataset(data_dir:str):
     device = torch.device('cpu')
-    files = sorted(Path(data_dir).glob("simulation_dump*.pt"))
+    files = sorted(Path(data_dir).glob("sim*.pt"))
     samples = []
     for file in files:
+        filename = int(str(file).split('sim_')[1].split('.pt')[0])
+        if filename > 100:
+            break
         data = data_to_graph(file,device)
         samples.append(data)
         print(file)
     print(len(files))
     return samples
 
-dataset = generate_dataset('torchfem_dataset/panel_plasticity_3')
-torch.save(dataset, "torchfem_dataset/panel_plasticity_3/panel_combined_steel.pt")
+dataset = generate_dataset('torchfem_dataset/simple_beam')
+torch.save(dataset, "torchfem_dataset/simple_beam/combined.pt")

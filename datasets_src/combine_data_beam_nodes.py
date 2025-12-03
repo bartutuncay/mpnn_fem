@@ -1,4 +1,4 @@
-## PyG Graph with Mesh & Element Nodes
+## PyG Graph with Mesh Nodes
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import glob
@@ -79,7 +79,6 @@ def data_to_graph(path:str,device):
     #data['nodes'].dr = simdata['dirichlet_disp'] #dirichlet displacement    [N,3]
 
     # element node properties: material, stiffness matrix
-    data['elements'].material = one_hot(vocab, device=device).unsqueeze(0).repeat(int(conn.shape[0]), 1) # [E,len(materials)]
     #data['elements'].stiffness = #stiffness is a learned feature
 
     # target properties
@@ -92,13 +91,10 @@ def data_to_graph(path:str,device):
 
     # edges: connectivity mesh-mesh, mesh-element
     # mesh-element: distance to element centroid
-    elem_mat = one_hot(vocab, device=device).unsqueeze(0).repeat(int(c2n_ei.shape[1]), 1)
-    data["elements", "contributes", "nodes"].edge_index = c2n_ei
-    data["elements", "contributes", "nodes"].edge_attr = torch.cat([c2n_w,elem_mat],dim=-1)
+    #elem_mat = one_hot(vocab, device=device).unsqueeze(0).repeat(int(c2n_ei.shape[1]), 1)
     
 
-    data["nodes", "belongs_to", "elements"].edge_index = c2n_ei.flip(0)
-    data["nodes", "belongs_to", "elements"].edge_attr = torch.cat([-c2n_w,elem_mat],dim=-1)
+    #data["nodes", "belongs_to", "elements"].edge_attr = torch.cat([-c2n_w,elem_mat],dim=-1)
     data['elements'].num_nodes = simdata['stress_history'].size(1)
 
     # mesh-mesh: distance

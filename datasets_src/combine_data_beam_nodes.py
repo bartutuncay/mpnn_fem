@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Tuple
 import glob
 import numpy as np
 import torch
+from scipy.spatial import KDTree
 from torch_geometric.data import HeteroData
 import pandas as pd
 
@@ -57,6 +58,7 @@ def mesh_edges_from_conn(conn: torch.Tensor) -> torch.Tensor:
 
 def mesh_edges_nearest(nodes: torch.Tensor) -> torch.Tensor: ##TODO
     # build mesh connections from nearest neighbors
+
     return
 
 # Connectivity
@@ -71,6 +73,7 @@ def data_to_graph(path:str,device):
     conn = conn.cpu().numpy() if isinstance(conn, torch.Tensor) else np.asarray(conn)
     nodes = simdata['nodes']
     c2n_ei, c2n_w = incidence_edges_from_conn(conn,nodes)  # [2, E_cn], [E_cn, 1]
+    tree = KDTree(nodes)
     
     # mesh node properties: positions, forces, BC, dirichlet displacement
     data['nodes'].pos = nodes #                                             [N,3]

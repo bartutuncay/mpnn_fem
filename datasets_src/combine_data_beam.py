@@ -142,5 +142,5 @@ def generate_dataset(data_dir:str):
     print(len(files))
     return samples
 
-dataset = generate_dataset('datasets/simple_beam')
-torch.save(dataset, "datasets/simple_beam/combined.pt")
+dataset = generate_dataset('torchfem_dataset/simple_beam_reduced')
+torch.save(dataset, "torchfem_dataset/simple_beam_reduced/combined.pt")

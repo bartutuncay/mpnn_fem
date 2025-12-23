@@ -150,6 +150,6 @@ torch.save(
         "elements":model.elements.detach().cpu(),
         "ext_forces": scaled,
     },
-    f"datasets/simple_beam/sim_{idx}.pt",
+    f"torchfem_dataset/simple_beam_reduced/sim_{idx}.pt",
 )
 

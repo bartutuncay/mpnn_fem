@@ -40,11 +40,11 @@ Note: `torch`, `torch-scatter`, and `torch-geometric` should be installed direct
 
 ## Data pipeline
 
-1. Generate raw FEM simulations into `datasets/<support>/<geom>/<loads>/sim_<idx>.pt`.
-2. Convert each raw simulation into per-timestep graph samples under `datasets/<support>/<geom>/<loads>/{train|test}/`.
-3. Compute normalization statistics into `datasets/<support>/<geom>/<loads>/norm/train_norm_stats.pt`.
+1. Generate raw FEM simulations into `datasets/support/geom/loads/sim_*.pt`.
+2. Convert each raw simulation into per-timestep graph samples under `datasets/support/geom/loads/{train|test}/`.
+3. Compute normalization statistics into `datasets/support/geom/loads/norm/train_norm_stats.pt`.
 
-The conversion step keeps timesteps `49+` and writes one processed graph file per timestep.
+The conversion step keeps the last timestep and writes one processed graph file per simulation.
 
 ## Usage
 
@@ -80,16 +80,9 @@ Generate multiple datasets in parallel:
 python3 scripts/parallel_generate_datasets.py --datasets cru crv vrv --start 0 --stop 100 --split-index 80 --raw-workers 4 --process-workers 4
 ```
 
-Train multiple models and datasets in parallel:
-
-```bash
-python3 scripts/parallel_train_models.py --models baseline multiscale_tanh_pe --datasets cru crv --workers 2 --devices 0 1
-```
-
-If `--devices` is omitted, jobs inherit the current CUDA visibility and may compete for the same GPU.
 
 ## Notes
 
-- Most training scripts run on `cuda` by default.
-- Model checkpoints and loss CSVs are written under `training/<model_name>/`.
-- The codebase currently uses standalone training files instead of a shared trainer abstraction, so the launcher scripts delegate to those files rather than reimplementing training logic.
+- Most training scripts run on `CUDA` by default.
+- Model checkpoints and loss CSVs are written under `training/*/`.
+- Each model has to be trained individually since a combined trainer is not implemented yet.

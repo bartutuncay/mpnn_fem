@@ -160,7 +160,6 @@ def dirichlet_loss(x, edge_index):
     
     return E / denom
 
-#train_set, val_set = split_dataset(dataset_val, val_ratio=0.1)
 train_loader = make_loader(f'datasets/{test_data_dir}/test', batch_size=1, shuffle=True, num_workers=4)
 norm_stats = torch.load(f"datasets/{test_data_dir}/norm/train_norm_stats.pt",weights_only=False)
 scaler = StandardScaler(norm_stats,device)

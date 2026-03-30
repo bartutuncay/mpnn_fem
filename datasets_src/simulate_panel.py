@@ -1,11 +1,15 @@
+## FEM script for constrained panel with vertical stiffeners
+# Experimental generator using the same pipeline as training datasets
+
 import torch
 from torchfem import Solid
 from torchfem.materials import IsotropicElasticity3D,IsotropicPlasticity3D,OrthotropicElasticity3D
 from torchfem.mesh import cube_hexa
-from torchfem.sdfs import Sphere, Cylinder, Box, Gyroid, Shell
-from torchfem.io import export_mesh
+from torchfem.sdfs import Box
 import numpy as np
+import os
 import argparse
+import time
 
 torch.set_default_dtype(torch.float64)
 
@@ -14,10 +18,6 @@ parser = argparse.ArgumentParser(description="Process one integer.")
 parser.add_argument("value", type=int, help="The integer to process")
 args = parser.parse_args()
 idx = args.value
-
-# Elastic material model
-#material = IsotropicElasticity3D(E=1000.0, nu=0.3)
-
 
 def sigma_f(q):
     return sigma_y + k * q
@@ -28,7 +28,7 @@ def sigma_f_prime(q):
 model = None
 nodes = None
 elements = None
-matlist = ['steel', 'aluminum']#, 'CFRP']
+matlist = ['steel', 'aluminum', 'CFRP']
 Lxrange = torch.linspace(60,140,5)
 Lyrange = torch.linspace(50,100,5)
 trange = torch.linspace(1,5,5)
@@ -72,8 +72,6 @@ ribp_l = np.linspace(np.random.uniform(0.4*-Lx,0.2*-Lx),np.random.uniform(0.4*Lx
 
 ## Plate with stiffeners
 nodes, elements = cube_hexa(int(Lx/resolution), int(Ly/resolution), max(5,int((ribh+t)/resolution)), Lx, Ly, ribh+t)
-#print(len(elements))
-# Create a solid object
 model = Solid(nodes, elements, material)
 center = torch.tensor([Lx/2,Ly/2,0])
 body = Box(center+torch.tensor([0,0,t/2+1e-5]),size=torch.tensor([Lx,Ly,t+1e-5])) # Plate: center, size
@@ -84,7 +82,6 @@ for rib in range(ribcount):
         ribgeom = Box(center+torch.tensor([ribp_l[rib],0,t+ribh/2]),torch.tensor([max(ribw,resolution),Ly,ribh]))
     body = body|ribgeom
 
-###
 sdf_vals = body.sdf(nodes)
 inside = sdf_vals <= 0.5
 mask = inside[elements].all(dim=1)
@@ -95,14 +92,11 @@ new_index[used] = torch.arange(len(used))
 elements = new_index[elements]
 nodes = nodes[used]
 model = Solid(nodes, elements, material)
-###
-
-#model.plot(node_property={"SDF": body.sdf(nodes)},contour=("SDF", [0.0]), color="skyblue")
 
 # Set constraints
 DL = 0.1
 model.displacements[nodes[:, 0] == 1.0, 0] = DL
-eps = 1e-8  # tolerance for floating-point coords
+eps = 1e-8  # tolerance for coordinates
 z0 = torch.isclose(nodes[:, 2], torch.tensor(0.0), atol=eps)
 xmin, xmax = nodes[:, 0].min(), nodes[:, 0].max()
 ymin, ymax = nodes[:, 1].min(), nodes[:, 1].max()
@@ -114,8 +108,7 @@ model.constraints[edge_mask, :] = True
 n_steps = 200
 peak_load = np.random.uniform(2e5,5e5)
 theta = torch.linspace(0, torch.pi*4+np.random.uniform(0,torch.pi), n_steps)
-increments = 0.5 * (1 - torch.cos(theta))            # starts at 0, peaks at 1, returns to 0
-# or for a simple quarter-cycle: torch.sin(torch.linspace(0, math.pi/2, n_steps))
+increments = 0.5 * (1 - torch.cos(theta)) # starts at 0, peaks at 1, returns to 0
 force_vector = torch.zeros_like(nodes)
 
 if loadtype == 'uniform':
@@ -153,10 +146,14 @@ if loadtype == 'incr_point':
 
 
 model.forces = force_vector
+scaled = force_vector.unsqueeze(0) * increments.view(-1, 1, 1)
+scaled_np = scaled.detach().cpu().numpy()
 
-#print(idx)
+t1 = time.time()
 u, f, stress, F, state = model.solve(increments=increments,method="spsolve",return_intermediate=True)
+t2 = time.time()
 
+os.makedirs('datasets/panel',exist_ok=True)
 torch.save(
     {
         "nodes": model.nodes,
@@ -169,10 +166,10 @@ torch.save(
         "boundary":model.constraints.detach().cpu(),
         "dirichlet_disp": model.displacements.detach().cpu(),
         "elements":model.elements.detach().cpu(),
+        "ext_forces": scaled,
+        "load_type": loadtype,
+        "sim_time": t2-t1,
     },
-    f"../../scratch/btuncay/gnn/torchfem_dataset/panel_plasticity/simulation_dump_{idx}.pt",
+    f"panel/sim_{idx}.pt",
 )
     
-#nodes = []
-#elements = []
-

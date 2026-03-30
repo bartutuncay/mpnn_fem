@@ -1,12 +1,12 @@
 ## Calculate dataset statistics and write results in dictionary
 
 import torch
-from dataloader_stress import make_loader
+from forward_src.dataloader_stress import make_loader
 from typing import Dict, List, Tuple, Union
 import argparse
 
 parser = argparse.ArgumentParser(description="dataset path")
-parser.add_argument("dataset", type=int, help="define dataset: use 3-letter abbreviation")
+parser.add_argument("dataset", type=str, help="define dataset: use 3-letter abbreviation")
 args = parser.parse_args()
 sim_dataset = args.dataset
 support = 'cantilever' if sim_dataset[0] == 'c' else 'var_bc'

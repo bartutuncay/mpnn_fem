@@ -20,7 +20,7 @@ from torch_geometric.nn import pool, TopKPooling
 from torch_geometric.utils import coalesce
 from torch_geometric.loader import DataLoader
 from scipy.spatial import cKDTree, Delaunay
-from datasets_src.dataloader import make_loader
+from forward_src.dataloader import make_loader
 import os
 import argparse
 import torch_geometric.typing as pyg_typing
@@ -31,7 +31,7 @@ torch.set_default_dtype(torch.float32)
 device = torch.device('cuda')
 
 parser = argparse.ArgumentParser(description="dataset path")
-parser.add_argument("dataset", type=int, help="define dataset: use 3-letter abbreviation")
+parser.add_argument("dataset", type=str, help="define dataset: use 3-letter abbreviation")
 args = parser.parse_args()
 sim_dataset = args.dataset
 support = 'cantilever' if sim_dataset[0] == 'c' else 'var_bc'
@@ -233,4 +233,3 @@ for epoch in range(1, EPOCHS + 1):
 print("Best val:", best_val)
 
 pd.DataFrame(loss_records).to_csv(f"training/multiscale_topk/{alias}/losses.csv", index=False)
-

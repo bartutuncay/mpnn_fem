@@ -1,0 +1,8 @@
+numpy
+scipy
+pandas
+torch
+torch-geometric
+torch-scatter
+comet-ml
+torchfem

@@ -20,7 +20,7 @@ from torch_geometric.nn import pool
 from torch_geometric.utils import coalesce
 from torch_geometric.loader import DataLoader
 from scipy.spatial import cKDTree, Delaunay
-from datasets_src.dataloader import make_loader
+from forward_src.dataloader import make_loader
 import os
 import time
 import argparse
@@ -32,7 +32,7 @@ torch.set_default_dtype(torch.float32)
 device = torch.device('cuda')
 
 parser = argparse.ArgumentParser(description="dataset path")
-parser.add_argument("dataset", type=int, help="define dataset: use 3-letter abbreviation")
+parser.add_argument("dataset", type=str, help="define dataset: use 3-letter abbreviation")
 args = parser.parse_args()
 sim_dataset = args.dataset
 support = 'cantilever' if sim_dataset[0] == 'c' else 'var_bc'
@@ -63,17 +63,6 @@ class StandardScaler:
 
     def inv_u(self, u_norm):
         return u_norm * self.s_u + self.m_u
-
-def split_dataset(dataset, val_ratio=0.1, shuffle=True):
-    n = len(dataset)
-    idx = torch.randperm(n) if shuffle else torch.arange(n)
-    n_val = max(1, int(n * val_ratio))
-    val_idx = idx[:n_val].tolist()
-    train_idx = idx[n_val:].tolist()
-    train_set = [dataset[i] for i in train_idx]
-    val_set   = [dataset[i] for i in val_idx]
-    return train_set, val_set
-
 
 class GNN(torch.nn.Module):
     def __init__(self, in_channels,edge_in,layers,latent_dim, out_channels):
@@ -209,4 +198,3 @@ for epoch in range(1, EPOCHS + 1):
 print("Best val:", best_val)
 
 pd.DataFrame(loss_records).to_csv(f"training/baseline/{alias}/losses.csv", index=False)
-

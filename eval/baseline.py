@@ -1,8 +1,7 @@
-## PyG Graph with Mesh Nodes
+# Evaluate Baseline Model
+
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from comet_ml import start
-from comet_ml.integration.pytorch import log_model
 import glob
 from torch_scatter import scatter_add
 import numpy as np
@@ -24,6 +23,7 @@ from scipy.spatial import cKDTree, Delaunay
 from gnn_2026.datasets_src.dataloader import make_loader
 import os
 import time
+import argparse
 import torch_geometric.typing as pyg_typing
 
 torch.set_default_dtype(torch.float32)
@@ -31,6 +31,15 @@ device = torch.device('cpu')
 
 from copy import deepcopy
 from pathlib import Path
+
+parser = argparse.ArgumentParser(description="dataset path")
+parser.add_argument("dataset", type=str, help="define dataset: use 3-letter abbreviation")
+args = parser.parse_args()
+sim_dataset = args.dataset
+support = 'cantilever' if sim_dataset[0] == 'c' else 'var_bc'
+geom = 'regular' if sim_dataset[1] == 'r' else 'warped'
+loads = 'uniform' if sim_dataset[2] == 'u' else 'non_uniform'
+data_dir = f'{support}/{geom}/{loads}'
 
 class GNN(torch.nn.Module):
     def __init__(self, in_channels,edge_in,layers,latent_dim, out_channels):
@@ -60,8 +69,8 @@ class GNN(torch.nn.Module):
         return x
 
 model = GNN(in_channels=46,edge_in=3,layers=12,latent_dim=128,out_channels=3).to(device)
-alias = 'baseline_cantilever_regular_uniform'
-ckpt_path = Path(f"../../../scratch/btuncay/gnn/ablation_models/1_simple_dataset/{alias}/weights_8400.pt")
+alias = 'baseline'
+ckpt_path = Path(f"training/baseline/{alias}/weights.pt") #change if training finished early!
 state = torch.load(ckpt_path, map_location=device)
 model.load_state_dict(state)
 model.eval()
@@ -84,26 +93,15 @@ class StandardScaler:
         x_norm = torch.cat([x[:, :3], x_force, x_pe], dim=1)
 
         y_u = ((batch.y_u.float() - self.m_u) / self.s_u)
-        # y_f = ((batch.y_fint.float() - self.m_f) / self.s_f)
 
         return x_norm, y_u
 
     def inv_u(self, u_norm):
         return u_norm * self.s_u + self.m_u
 
-def dirichlet_loss(x, edge_index):
-    row, col = edge_index  # [E], [E]
-    diff = x[row] - x[col] # [E, C]
-    sq = (diff * diff).sum(dim=-1)
-    w = torch.ones_like(sq)
-    E = 0.5 * (w * sq).sum()
-    denom = (w.sum().clamp_min(1.0))
-    
-    return E / denom
 
-#train_set, val_set = split_dataset(dataset_val, val_ratio=0.1)
-train_loader = make_loader('../../../scratch/btuncay/gnn/ablation_datasets/cantilever/regular/uniform/val', batch_size=1, shuffle=True, num_workers=4)
-norm_stats = torch.load(f"../../../scratch/btuncay/gnn/ablation_datasets/cantilever/regular/uniform/norm/train_norm_stats.pt",weights_only=False)
+train_loader = make_loader(f'datasets/{data_dir}/val', batch_size=1, shuffle=True, num_workers=4)
+norm_stats = torch.load(f"datasets/{data_dir}/norm/train_norm_stats.pt",weights_only=False)
 scaler = StandardScaler(norm_stats,device)
 
 c = 0
@@ -116,8 +114,6 @@ with torch.no_grad():
         x = d.x
         edge_index = d.edge_index
         edge_attr = d.edge_attr
-        #edge_index = data.edge_index_dict.values()
-        #edge_attr = data.edge_attr_dict.values()
         batch = d.to(device)
         x_in, y_u = scaler.norm_inputs_targets(batch)
 
@@ -127,13 +123,9 @@ with torch.no_grad():
             batch.edge_attr,
             batch.batch)
 
-        # Detach and move predictions to CPU for saving
-
         d.y_u = scaler.inv_u(y_u)
         d.pred_u = scaler.inv_u(pred)
-        # Move the data structure back to CPU before attaching CPU tensors
 
-        # Attach predictions into the dictionary
         t2 = time.time()
 
         #METRICS
@@ -148,11 +140,10 @@ with torch.no_grad():
         pos_delta = np.mean(np.abs(pos_diff_pred[mask] - pos_diff[mask]) / pos_diff[mask])
         d.mae = pos_delta
 
-        #physicality: dirichlet loss + boundary
+        #physicality: boundary preservation
         bc = batch.x[:,:3]
         pred_mask = pred > 0.999
         pred_u_bc = pred[pred_mask].mean() #0 if bcs stay in place
-        dir_loss = dirichlet_loss(pred,batch.edge_index)
         physical_score = 1-(pred_u_bc)
         d.phy = physical_score
 
@@ -174,6 +165,7 @@ with torch.no_grad():
         if c >= 100:
             break
 # Save to a new file
-save_path = f"../../../scratch/btuncay/gnn/ablation_models/1_simple_dataset/{alias}/preds_0328_{alias}.pt"
+os.makedirs(f'test/{alias}',exist_ok=True)
+save_path = f"test/{alias}/preds_{alias}.pt"
 torch.save(out_samples, save_path)
 print(f"Saved {len(out_samples)} samples with predictions to {save_path}")

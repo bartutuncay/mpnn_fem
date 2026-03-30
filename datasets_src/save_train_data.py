@@ -36,8 +36,8 @@ mesh_conn = 'element'#, 'knn'
 
 parser = argparse.ArgumentParser(description="index, dataset")
 parser.add_argument("value", type=int, help="integer to process")
-parser.add_argument("dataset", type=int, help="define dataset: use 3-letter abbreviation")
-parser.add_argument("train", type=int, help="define dataset: train or test")
+parser.add_argument("dataset", type=str, help="define dataset: use 3-letter abbreviation")
+parser.add_argument("train", type=str, choices=("train", "test"), help="split to write")
 args = parser.parse_args()
 sim_idx = args.value
 sim_dataset = args.dataset
@@ -48,7 +48,7 @@ support = 'cantilever' if sim_dataset[0] == 'c' else 'var_bc'
 geom = 'regular' if sim_dataset[1] == 'r' else 'warped'
 loads = 'uniform' if sim_dataset[2] == 'u' else 'non_uniform'
 data_dir = f'{support}/{geom}/{loads}'
-train = 'train' if 'train' in sim_train else 'test'
+train = sim_train
 
 def mesh_edges_from_conn(conn: torch.Tensor)->torch.Tensor:
     conn = conn.long() # original connectivity matrix
@@ -160,7 +160,7 @@ def generate_dataset(data_dir:str):
     print(len(samples))
     return samples
 
-dataset = generate_dataset(f"datasets/data_dir/sim_{sim_idx}.pt")
+dataset = generate_dataset(f"datasets/{data_dir}/sim_{sim_idx}.pt")
 
 ea = dataset[0].edge_attr
 ea_sph = dataset[0].edge_attr_sph

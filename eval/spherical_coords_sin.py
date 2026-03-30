@@ -1,4 +1,5 @@
-## PyG Graph with Mesh Nodes
+# Evaluate Multi-Scale Model with Spherical Coordinates and Periodic Activation Function
+
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from comet_ml import start
@@ -21,9 +22,10 @@ from torch_geometric.nn import pool
 from torch_geometric.utils import coalesce
 from torch_geometric.loader import DataLoader
 from scipy.spatial import cKDTree, Delaunay
-from gnn_2026.datasets_src.dataloader_stress import make_loader
+from datasets_src.dataloader_stress import make_loader
 import os
 import time
+import argparse
 import torch_geometric.typing as pyg_typing
 
 torch.set_default_dtype(torch.float32)
@@ -31,6 +33,21 @@ device = torch.device('cpu')
 
 from copy import deepcopy
 from pathlib import Path
+
+parser = argparse.ArgumentParser(description="dataset path")
+parser.add_argument("dataset", type=str, help="define dataset: use 3-letter abbreviation")
+parser.add_argument("test_dataset", type=str, help="define testing dataset: use 3-letter abbreviation")
+args = parser.parse_args()
+sim_dataset = args.dataset
+test_dataset = args.test_dataset
+support = 'cantilever' if sim_dataset[0] == 'c' else 'var_bc'
+geom = 'regular' if sim_dataset[1] == 'r' else 'warped'
+loads = 'uniform' if sim_dataset[2] == 'u' else 'non_uniform'
+data_dir = f'{support}/{geom}/{loads}'
+support = 'cantilever' if test_dataset[0] == 'c' else 'var_bc'
+geom = 'regular' if test_dataset[1] == 'r' else 'warped'
+loads = 'uniform' if test_dataset[2] == 'u' else 'non_uniform'
+test_data_dir = f'{support}/{geom}/{loads}'
 
 class StandardScaler:
     def __init__(self, node_stats_dict: dict, device):
@@ -99,15 +116,15 @@ class GEN_Multiscale(torch.nn.Module):
     def __init__(self, in_channels,edge_in,layers,layers_coarse,latent_dim, out_channels):
         super().__init__()
         self.proj = MLP(in_channels=in_channels,hidden_channels=latent_dim,out_channels=latent_dim,num_layers=2,act='tanh',norm='layer')
-        self.edge_proj = MLP_sin(in_channels=edge_in,hidden_channels=latent_dim,out_channels=latent_dim,num_layers=2,act='tanh',norm='layer')
+        self.edge_proj = MLP_sin(in_channels=edge_in,hidden_channels=latent_dim,out_channels=latent_dim,num_layers=2,act='sine',norm='layer')
         
         # coarse projection: takes in zeros, outputs latent*2, shares nodes with fine graph
         self.coarse_proj = MLP(in_channels=1,hidden_channels=latent_dim*2,out_channels=latent_dim*2,num_layers=2,act='tanh',norm='layer')
         
-        self.coarse_edge_proj = MLP_sin(in_channels=edge_in,hidden_channels=latent_dim,out_channels=latent_dim,num_layers=2,act='tanh',norm='layer')
+        self.coarse_edge_proj = MLP_sin(in_channels=edge_in,hidden_channels=latent_dim,out_channels=latent_dim,num_layers=2,act='sine',norm='layer')
 
-        self.aggr_edge_proj = MLP_sin(in_channels=edge_in,hidden_channels=latent_dim,out_channels=latent_dim,num_layers=2,act='tanh',norm='layer')
-        self.diff_edge_proj = MLP_sin(in_channels=edge_in,hidden_channels=latent_dim,out_channels=latent_dim,num_layers=2,act='tanh',norm='layer')
+        self.aggr_edge_proj = MLP_sin(in_channels=edge_in,hidden_channels=latent_dim,out_channels=latent_dim,num_layers=2,act='sine',norm='layer')
+        self.diff_edge_proj = MLP_sin(in_channels=edge_in,hidden_channels=latent_dim,out_channels=latent_dim,num_layers=2,act='sine',norm='layer')
         
         self.layers = layers
 
@@ -161,9 +178,10 @@ class GEN_Multiscale(torch.nn.Module):
         x_u = self.inv_proj(x)
         return x_f, x_u
 
+
 model = GEN_Multiscale(in_channels=6,edge_in=3,layers=4,layers_coarse=12,latent_dim=64,out_channels=3).to(device)
-alias = 'spherical_coords_sin_cantilever_regular_uniform'
-ckpt_path = Path(f"../../../scratch/btuncay/gnn/ablation_models/1_simple_dataset/{alias}/weights_8200.pt")
+alias = f"spherical_coords_sin_{sim_dataset}"
+ckpt_path = Path(f"training/spherical_coords_sin/{alias}/weights.pt")
 state = torch.load(ckpt_path, map_location=device)
 model.load_state_dict(state)
 model.eval()
@@ -195,19 +213,9 @@ class StandardScaler:
     def inv_f(self, f_norm):
         return f_norm * self.s_f + self.m_f
 
-def dirichlet_loss(x, edge_index):
-    row, col = edge_index  # [E], [E]
-    diff = x[row] - x[col] # [E, C]
-    sq = (diff * diff).sum(dim=-1)
-    w = torch.ones_like(sq)
-    E = 0.5 * (w * sq).sum()
-    denom = (w.sum().clamp_min(1.0))
-    
-    return E / denom
-
 #train_set, val_set = split_dataset(dataset_val, val_ratio=0.1)
-train_loader = make_loader('../../../scratch/btuncay/gnn/ablation_datasets/cantilever/warped/non_uniform/val', batch_size=1, shuffle=True, num_workers=4)
-norm_stats = torch.load(f"../../../scratch/btuncay/gnn/ablation_datasets/cantilever/regular/uniform_new/norm/train_norm_stats.pt",weights_only=False)
+train_loader = make_loader(f'datasets/{test_data_dir}/test', batch_size=1, shuffle=True, num_workers=4)
+norm_stats = torch.load(f"datasets/{test_data_dir}/norm/train_norm_stats.pt",weights_only=False)
 scaler = StandardScaler(norm_stats,device)
 
 c = 0
@@ -220,8 +228,6 @@ with torch.no_grad():
         x = d.x
         edge_index = d.edge_index
         edge_attr = d.edge_attr
-        #edge_index = data.edge_index_dict.values()
-        #edge_attr = data.edge_attr_dict.values()
         batch = d.to(device)
         x_in, y_u, y_fint = scaler.norm_inputs_targets(batch)
 
@@ -237,13 +243,9 @@ with torch.no_grad():
             batch.edge_attr_aggr,
             batch.batch)
 
-        # Detach and move predictions to CPU for saving
-
         d.y_u = scaler.inv_u(y_u)
         d.pred_u = scaler.inv_u(pred)
-        # Move the data structure back to CPU before attaching CPU tensors
 
-        # Attach predictions into the dictionary
         t2 = time.time()
 
         #METRICS
@@ -258,12 +260,11 @@ with torch.no_grad():
         pos_delta = np.mean(np.abs(pos_diff_pred[mask] - pos_diff[mask]) / pos_diff[mask])
         d.mae = pos_delta
 
-        #physicality: dirichlet loss + boundary
+        #physicality: boundary preservation
         bc = batch.x[:,:3]
         pred_mask = pred > 0.999
         pred_u_bc = pred[pred_mask].mean() #0 if bcs stay in place
-        dir_loss = dirichlet_loss(pred,batch.edge_index)
-        physical_score = 1-(dir_loss+pred_u_bc)
+        physical_score = 1-(pred_u_bc)
         d.phy = physical_score
 
         sample = {
@@ -284,6 +285,7 @@ with torch.no_grad():
         if c >= 100:
             break
 # Save to a new file
-save_path = f"../../../scratch/btuncay/gnn/ablation_models/1_simple_dataset/{alias}/2n_preds_{alias}.pt"
+os.makedirs(f'test/{alias}',exist_ok=True)
+save_path = f"test/{alias}/preds_{alias}_{test_dataset}.pt"
 torch.save(out_samples, save_path)
 print(f"Saved {len(out_samples)} samples with predictions to {save_path}")

@@ -20,7 +20,7 @@ from torch_geometric.nn import pool
 from torch_geometric.utils import coalesce
 from torch_geometric.loader import DataLoader
 from scipy.spatial import cKDTree, Delaunay
-from gnn_2026.datasets_src.dataloader import make_loader
+from datasets_src.dataloader import make_loader
 import os
 import time
 import argparse
@@ -34,12 +34,18 @@ from pathlib import Path
 
 parser = argparse.ArgumentParser(description="dataset path")
 parser.add_argument("dataset", type=str, help="define dataset: use 3-letter abbreviation")
+parser.add_argument("test_dataset", type=str, help="define testing dataset: use 3-letter abbreviation")
 args = parser.parse_args()
 sim_dataset = args.dataset
+test_dataset = args.test_dataset
 support = 'cantilever' if sim_dataset[0] == 'c' else 'var_bc'
 geom = 'regular' if sim_dataset[1] == 'r' else 'warped'
 loads = 'uniform' if sim_dataset[2] == 'u' else 'non_uniform'
 data_dir = f'{support}/{geom}/{loads}'
+support = 'cantilever' if test_dataset[0] == 'c' else 'var_bc'
+geom = 'regular' if test_dataset[1] == 'r' else 'warped'
+loads = 'uniform' if test_dataset[2] == 'u' else 'non_uniform'
+test_data_dir = f'{support}/{geom}/{loads}'
 
 class GNN(torch.nn.Module):
     def __init__(self, in_channels,edge_in,layers,latent_dim, out_channels):
@@ -100,8 +106,8 @@ class StandardScaler:
         return u_norm * self.s_u + self.m_u
 
 
-train_loader = make_loader(f'datasets/{data_dir}/val', batch_size=1, shuffle=True, num_workers=4)
-norm_stats = torch.load(f"datasets/{data_dir}/norm/train_norm_stats.pt",weights_only=False)
+train_loader = make_loader(f'datasets/{test_data_dir}/test', batch_size=1, shuffle=True, num_workers=4)
+norm_stats = torch.load(f"datasets/{test_data_dir}/norm/train_norm_stats.pt",weights_only=False)
 scaler = StandardScaler(norm_stats,device)
 
 c = 0
@@ -166,6 +172,6 @@ with torch.no_grad():
             break
 # Save to a new file
 os.makedirs(f'test/{alias}',exist_ok=True)
-save_path = f"test/{alias}/preds_{alias}.pt"
+save_path = f"test/{alias}/preds_{alias}_{test_dataset}.pt"
 torch.save(out_samples, save_path)
 print(f"Saved {len(out_samples)} samples with predictions to {save_path}")

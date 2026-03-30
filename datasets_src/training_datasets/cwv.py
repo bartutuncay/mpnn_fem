@@ -1,4 +1,5 @@
-## varying BC supports - REgular shape - Non-Uniform load
+## Cantilever supports - Warped mesh - Non-uniform load
+# Recommended to run in parallel using a scheduler
 
 import torch
 torch.set_default_dtype(torch.float64)
@@ -7,16 +8,15 @@ torch.set_default_device(device)
 
 from torchfem import Solid
 from torchfem.materials import IsotropicPlasticity3D
-from torchfem.mesh import cube_hexa, wrap_around_z
-from torchfem.sdfs import Sphere, Cylinder, Box, Gyroid, Shell
-from torchfem.io import export_mesh
-#import pyvista
+from torchfem.mesh import cube_hexa
+from torchfem.sdfs import Box
 import numpy as np
+import os
 import argparse
-#pyvista.set_plot_theme('document')
+import time
 
-parser = argparse.ArgumentParser(description="Process one integer.")
-parser.add_argument("value", type=int, help="The integer to process")
+parser = argparse.ArgumentParser(description="index")
+parser.add_argument("value", type=int, help="integer to process")
 args = parser.parse_args()
 idx = args.value
 
@@ -25,6 +25,7 @@ nu = 0.3
 sigma_y = 250
 k = 2e3
 
+# Hardening function
 def sigma_f(q):
     return sigma_y + k * q
 # Derivative of the hardening function
@@ -40,29 +41,23 @@ elements = None
 torch.random.manual_seed(idx)
 np.random.seed(idx)
 
-Lx = np.random.uniform(30,70)      # flange - original: 50-100
-Ly = np.random.uniform(50,100)      # web - original: 60-140
-Lz = np.random.uniform(200,800)    # length - original: 200-1200
-w = np.random.uniform(2,6)          # flange thickness - original: 2-5
-t = np.random.uniform(2,5)          # web thickness - original: 1-5
-support_loc = np.random.choice(['bottom','top','clamped','simply_supported'])
+Lx = np.random.uniform(30,70)       # flange
+Ly = np.random.uniform(50,100)      # web
+Lz = np.random.uniform(200,800)     # length
+w = np.random.uniform(2,6)          # flange thickness
+t = np.random.uniform(2,5)          # web thickness
+support_loc = np.random.choice(['bottom','top'])
 force_loc = np.random.choice(['right','left'])
-#problem types: bending->cantilever only
+# problem types:
 load_type = np.random.choice(['bending','shear','torsion','axial','point','ramp'])
-R = np.random.uniform(1000,20000)  # curvature radius
-x0 = 0
 
-
-#resolution = torch.randint(1,4,(1,))
 resolution = torch.randint(3,6,(1,))
 
-## Initialize mesh
+# Initialize mesh
 nodes, elements = cube_hexa(int(Lx/resolution), int((Ly+2*w)/resolution), int(Lz/resolution), Lx, Ly+(2*w), Lz)
 
 # Create a solid object
 model = Solid(nodes, elements, material)
-
-
 center = torch.tensor([Lx/2,(Ly+(2*w))/2,Lz/2])
 
 flange_top = Box(center=center+torch.tensor([0,Ly/2+w/2,0]),size=torch.tensor([Lx,w,Lz]))
@@ -70,10 +65,8 @@ flange_bottom = Box(center=center+torch.tensor([0,-Ly/2-w/2,0]),size=torch.tenso
 web = Box(center=center+torch.tensor([0,0,0]),size=torch.tensor([t,Ly,Lz]))
 
 body = flange_top|flange_bottom|web
-#model.plot(node_property={"SDF": body.sdf(nodes)},contour=("SDF", [0.0]), color="skyblue")
 
-
-# Apply distance function
+# Apply distance function to filter nodes
 sdf_vals = body.sdf(nodes)
 inside = sdf_vals <= 2
 mask = inside[elements].any(dim=1)
@@ -84,8 +77,8 @@ new_index[used] = torch.arange(len(used))
 elements = new_index[elements]
 nodes = nodes[used]
 
-## Define boundary nodes
-eps = 2e-3  # tolerance for floating-point coords
+# Define boundary nodes
+eps = 2e-3  # tolerance for coordinates
 xmin, xmax = nodes[:, 0].min(), nodes[:, 0].max()
 ymin, ymax = nodes[:, 1].min(), nodes[:, 1].max()
 zmin, zmax = nodes[:, 2].min(), nodes[:, 2].max()
@@ -98,14 +91,38 @@ else:
     on_z_edge = torch.isclose(nodes[:, 1], ymin, atol=eps)
     on_z_support = torch.isclose(nodes[:, 1], ymax, atol=eps)
 
+# Add twist to mesh
+center_xy = torch.tensor([Lx/2, (Ly + 2*w)/2], dtype=nodes.dtype, device=nodes.device)
+
+zmin = nodes[:, 2].min()
+zmax = nodes[:, 2].max()
+total_twist_deg = np.random.uniform(-30.0, 30.0)
+total_twist_rad = torch.tensor(total_twist_deg * np.pi / 180.0, dtype=nodes.dtype)
+x = nodes[:, 0]
+y = nodes[:, 1]
+z = nodes[:, 2]
+
+xc, yc = center_xy[0], center_xy[1]
+zspan = (zmax - zmin).clamp_min(1e-12)
+s = (z - zmin) / zspan
+theta = total_twist_rad * s  # linear ramp
+
+c = torch.cos(theta)
+sn = torch.sin(theta)
+
+xr = x - xc
+yr = y - yc
+
+x_new = xc + c * xr - sn * yr
+y_new = yc + sn * xr + c * yr
+z_new = z
+
+nodes = torch.stack([x_new, y_new, z_new], dim=1)
 model = Solid(nodes, elements, material)
 
 # Set constraints
-#DL = 0.1
-#model.displacements[nodes[:, 0] == 0, 0] = DL
 model.displacements[on_z_zero, :] = 0
 model.constraints[on_z_zero, :] = True
-#model.constraints[:, 0] = True
 
 n_steps = 100
 peak_load = np.random.uniform(1e3,1e4)
@@ -116,12 +133,10 @@ if load_type == 'axial':
     force_dir = torch.tensor([0,0,1])
 
 
-#force_dir = torch.tensor([0,1,0])
 force_vector = torch.zeros_like(nodes)
 
 # Incremental loading
 increments = torch.linspace(0.0, 1.0, int(n_steps/2))
-#bottom = torch.isclose(nodes[:, 1], ymax, atol=eps)
 force_vector[on_z_edge, 0] = -peak_load / on_z_edge.sum() * force_dir[0]
 force_vector[on_z_edge, 1] = -peak_load / on_z_edge.sum() * force_dir[1]
 force_vector[on_z_edge, 2] = -peak_load / on_z_edge.sum() * force_dir[2]
@@ -162,31 +177,16 @@ if support_loc == 'bottom':
     force_vector[on_z_zero, 1] = 0
     force_vector[on_z_zero, 2] = 0
     model.constraints[on_z_top,:] = False
-if support_loc == 'clamped':
-    model.displacements[on_z_top] = 0
-    model.constraints[on_z_top] = True
-    force_vector[on_z_top, 0] = 0
-    force_vector[on_z_top, 1] = 0
-    force_vector[on_z_top, 2] = 0
-if support_loc == 'simply_supported':
-    model.displacements[on_z_top] = 0
-    support_pin = on_z_zero & on_z_support
-    support_roller = on_z_top & on_z_support
-    model.constraints[support_pin,:] = True
-    model.constraints[support_roller,1] = True
-    force_vector[on_z_top, 0] = 0
-    force_vector[on_z_top, 1] = 0
-    force_vector[on_z_top, 2] = 0
-
 
 model.forces = force_vector
 scaled = force_vector.unsqueeze(0) * increments.view(-1, 1, 1)
 scaled_np = scaled.detach().cpu().numpy()
-#scaled = np.array([force_vector * inc for inc in increments])
 
-
+t1 = time.time()
 u, f, stress, F, state = model.solve(increments=increments,method="spsolve",return_intermediate=True,verbose=True) #rtol=1e-5
+t2 = time.time()
 
+os.makedirs('datasets/cantilever/warped/non_uniform',exist_ok=True)
 torch.save(
     {
         "nodes": model.nodes,
@@ -202,7 +202,8 @@ torch.save(
         "ext_forces": scaled,
         "support_loc": support_loc,
         "force_loc": force_loc,
+        "force_loc": force_loc,
+        "sim_time": t2-t1,
     },
-    f"../../../scratch/btuncay/gnn/ablation_datasets/var_bc/regular/non_uniform/sim_{idx}.pt",
+    f"datasets/cantilever/warped/non_uniform/sim_{idx}.pt",
 )
-

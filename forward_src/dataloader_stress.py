@@ -7,12 +7,6 @@ from typing import Any, Dict, List, Optional, Sequence, Union, Tuple
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-#Data(edge_index=[2, 24804], edge_attr=[24804, 3],
-#  pos=[4900, 3], num_nodes=4900, x=[4900, 46], fext=[4900, 3],
-#  y_u=[4900, 3], y_fint=[4900, 3], coarse_features=[4900, 1],
-#  edge_index_coarse=[2, 1002], edge_attr_coarse=[1002, 3], edge_index_diff=[2, 9800],
-#  edge_attr_diff=[9800, 3], edge_index_aggr=[2, 9800], edge_attr_aggr=[9800, 3])
-
 @dataclass
 class DataBatch:
     edge_index: Optional[torch.Tensor] = None           
@@ -48,8 +42,6 @@ class DataBatch:
         return self
 
 class PtDictFolderDataset(Dataset):
-    """
-    """
     def __init__(self, root_dir: Union[str, Path], pattern: str = "*.pt"):
         self.root_dir = Path(root_dir)
         self.files = sorted(self.root_dir.glob(pattern))

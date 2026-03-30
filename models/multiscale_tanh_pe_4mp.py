@@ -1,8 +1,8 @@
-## PyG Graph with Mesh Nodes
+# Multi-Scale Model with tanh Activation Functions, 4 Message Passing Steps
+
+
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from comet_ml import start
-from comet_ml.integration.pytorch import log_model
 import glob
 from torch_scatter import scatter_add
 import numpy as np
@@ -21,15 +21,24 @@ from torch_geometric.nn import pool
 from torch_geometric.utils import coalesce
 from torch_geometric.loader import DataLoader
 from scipy.spatial import cKDTree, Delaunay
-from gnn_2026.datasets_src.dataloader_stress import make_loader
+from datasets_src.dataloader_stress import make_loader
 import os
-import time
+import argparse
 import torch_geometric.typing as pyg_typing
 
 pyg_typing.WITH_INDEX_SORT = False
 
 torch.set_default_dtype(torch.float32)
 device = torch.device('cuda')
+
+parser = argparse.ArgumentParser(description="dataset path")
+parser.add_argument("dataset", type=int, help="define dataset: use 3-letter abbreviation")
+args = parser.parse_args()
+sim_dataset = args.dataset
+support = 'cantilever' if sim_dataset[0] == 'c' else 'var_bc'
+geom = 'regular' if sim_dataset[1] == 'r' else 'warped'
+loads = 'uniform' if sim_dataset[2] == 'u' else 'non_uniform'
+data_dir = f'{support}/{geom}/{loads}'
 
 class StandardScaler:
     def __init__(self, node_stats_dict: dict, device):
@@ -170,9 +179,9 @@ def compute_losses(batch, pred_u, pred_f, y_u, y_f):
 ## Training Loop
 model = GEN_Multiscale(in_channels=10,edge_in=3,layers=2,layers_coarse=4,latent_dim=128,out_channels=3).to(device)
 
-alias = "multiscale_tanh_pe_4mp_bcs_warped_non_uniform"
+alias = f"multiscale_tanh_pe_4mp_{sim_dataset}"
 print(alias)
-os.makedirs(f"../../../scratch/btuncay/gnn/ablation_models/3_loads_bcs/{alias}",exist_ok=True)
+os.makedirs(f"training/multiscale_tanh_pe_4mp/{alias}",exist_ok=True)
 opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', factor=0.5, patience=300)
 
@@ -181,12 +190,9 @@ def run_epoch(loader, train=True):
     total, last_loss_dict = 0.0, {}
     i=0
     for batch in loader:
-        t1 = time.time()
         batch = batch.to(device)
         x_in, y_u, y_fint = scaler.norm_inputs_targets(batch)
-        t2 = time.time()
         opt.zero_grad(set_to_none=True)
-        #print(batch)
         x_in = torch.cat([batch.l_cen,batch.l_dist,x_in],dim=-1)
 
         pred_f, pred_u = model(
@@ -200,35 +206,19 @@ def run_epoch(loader, train=True):
             batch.edge_index_aggr,
             batch.edge_attr_aggr,
             batch.batch)
-        t3 = time.time()
         
-        #dir_loss = dirichlet_loss(pred,batch.edge_index)
         loss, loss_dict = compute_losses(batch, pred_u, pred_f, y_u, y_fint)
-        #loss=loss+(0.1*dir_loss)
         last_loss_dict = loss_dict  # keep something to return
 
         if train:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
-        #total += loss.item()
         total += float(loss.detach())
-        t4=time.time()
-        #print('load: ',t2-t1,'s, forward pass: ',t3-t2,'s, backpropagation: ',t4-t3,'s')
         i+=1
-        #if i >= 100:
-        #    break
-    #steps = i
     steps = max(1, len(loader))
     return total / steps, last_loss_dict
 
-
-# Comet - logging
-experiment = start(api_key="7VD3oulgQdsrnNz60JDDhY86O",project_name="mpnn-fem",workspace="btuncay")
-
-hyper_params = {'learning_rate': 5e-4,'steps': 10000,'batch_size':1}
-experiment.log_parameters(hyper_params)
-log_model(experiment,model=model,model_name=alias)
 
 EPOCHS = 10000
 best_val = float("inf")
@@ -236,8 +226,8 @@ best_state = None
 loss_records = []
 
 #torch.cuda.empty_cache()
-train_loader = make_loader('../../../scratch/btuncay/gnn/ablation_datasets/var_bc/warped/non_uniform/train', batch_size=1, shuffle=True, num_workers=4)
-norm_stats = torch.load(f"../../../scratch/btuncay/gnn/ablation_datasets/var_bc/warped/non_uniform/norm/train_norm_stats.pt",weights_only=False)
+train_loader = make_loader(f'datasets/{data_dir}/train', batch_size=1, shuffle=True, num_workers=4)
+norm_stats = torch.load(f"datasets/{data_dir}/norm/train_norm_stats.pt",weights_only=False)
 scaler = StandardScaler(norm_stats,device)
 
 for epoch in range(1, EPOCHS + 1):
@@ -249,33 +239,8 @@ for epoch in range(1, EPOCHS + 1):
     if epoch == 1 or epoch % 5 == 0:
         print(f"Epoch {epoch:03d} | total loss: {train_loss:.6f} | losses: {train_ld}")
     if epoch == 1 or epoch % 200 == 0:
-        torch.save(model.state_dict(), f"../../../scratch/btuncay/gnn/ablation_models/3_loads_bcs/{alias}/weights_{epoch}.pt")
+        torch.save(model.state_dict(), f"training/multiscale_tanh_pe_4mp/{alias}/weights_{epoch}.pt")
 
 print("Best val:", best_val)
 
-pd.DataFrame(loss_records).to_csv(f"../../../scratch/btuncay/gnn/ablation_models/3_loads_bcs/{alias}/losses.csv", index=False)
-
-## NEW:
-# generalization study
-# physics loss
-# variable cantilever fix position
-# high weighted losses at supports
-# distance to supports
-# rotate shape along x/y/z
-
-## TODO:
-# save node-wise element stresses
-# subgraph mean pooling
-# edge attrs in spherical coordinates
-# torsion/moment/shear problem
-# holes/reduced section beams
-# distance to loads --> path from node to load?
-# circular activation function
-# results description - what worked, what didn't, why
-# attention based pooling
-# sensitivity analysis
-# EGNN
-
-# equivariant positions: se3
-# neural operator
-# inverted edge weights
+pd.DataFrame(loss_records).to_csv(f"training/multiscale_tanh_pe_4mp/{alias}/losses.csv", index=False)
